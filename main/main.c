@@ -8,11 +8,117 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
-#include "esp_http_server.h"
-
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
+#include "esp_vfs.h"
+#include "esp_http_server.h"
+#include "../components/spiffs/spiffs_config.c"
+
+
+// Definición de la macro MIN
+#ifndef MIN
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#endif
+
+static const char* html_code = 
+    "<!DOCTYPE html>"
+    "<html>"
+    "<head>"
+    "<title>Laboratorio 2b</title>"
+    "<style>"
+    "body { font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }"
+    "</style>"
+    "</head>"
+    "<body>"
+    "<div>"
+    "<h1>Bienvenido!</h1>"
+    "<h2>Al Laboratorio 2b de Miguel Alonso y Agustina Roballo</h2>"
+    "</div>"
+    "<form action=\"/echo\" method=\"post\">"
+        "<textarea name=\"message\" placeholder='Ingrese su mensaje...' maxlength='100'></textarea>"
+        "<input type=\"submit\" value=\"Enviar\">"
+      "</form>"
+    "</body>"
+    "</html>";
+
+// REQUEST HANDLERS
+static esp_err_t index_get_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, html_code, strlen(html_code));
+    return ESP_OK;
+}
+
+esp_err_t hello_get_handler(httpd_req_t *req)
+{
+    const char resp[] = "Hola mundo";
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Función para reemplazar '+' con ' ' en una cadena
+void replace_plus_with_space(char *str) {
+    for (int i = 0; str[i]; i++) {
+        if (str[i] == '+') {
+            str[i] = ' ';
+        }
+    }
+}
+esp_err_t echo_post_handler(httpd_req_t *req) {
+    char buf[100];
+    int ret, remaining = req->content_len;
+
+    if (remaining > 0) {
+        printf("Esperando recibir %d bytes\n", remaining);
+    } else {
+        printf("No hay datos para recibir.\n");
+    }
+
+    while (remaining > 0) {
+        ret = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf)));
+        if (ret <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                // Manejo del timeout sin imprimir nada aún
+                continue;
+            }
+            printf("Error recibiendo datos: %d\n", ret);
+            return ESP_FAIL;
+        }
+        printf("Datos recibidos: %.*s\n", ret, buf);
+        remaining -= ret;
+    }
+    
+    // Decodificar y reemplazar '+' con espacios
+    char message[100] = {0};
+    if (httpd_query_key_value(buf, "message", message, sizeof(message)) == ESP_OK) {
+        replace_plus_with_space(message);  // Convertir '+' a espacios
+        printf("Mensaje decodificado: %s\n", message);
+    } else {
+        printf("No se pudo decodificar el mensaje.\n");
+    }
+
+    const char* resp_str = "Datos recibidos";
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+    return ESP_OK;
+}
+
+// ENDPOINTS
+httpd_uri_t home = {
+    .uri       = "/",
+    .method    = HTTP_GET,
+    .handler   = index_get_handler,
+    .user_ctx  = NULL
+};
+
+httpd_uri_t echo = {
+    .uri       = "/echo",
+    .method    = HTTP_POST,
+    .handler   = echo_post_handler,
+    .user_ctx  = NULL
+};
+
+
+// EVENT HANDLERS
 static int s_retry_num = 0;
 static const int EXAMPLE_ESP_MAXIMUM_RETRY = 5;
 
@@ -23,21 +129,17 @@ static void sta_event_handler(void* arg, esp_event_base_t event_base, int32_t ev
         if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
             esp_wifi_connect();
             s_retry_num++;
-            // Removido ESP_LOGI, manejar el estado en tu propia lógica de aplicación.
         } else {
-            // Manejo de la conexión fallida sin FreeRTOS.
             // Aquí podrías, por ejemplo, cambiar el estado de una variable o llamar a una función propia de manejo de error.
             s_retry_num = 0; // Resetea el contador de reintentos
+            
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        // Removido ESP_LOGI, considera almacenar la IP obtenida en una estructura o variable.
         s_retry_num = 0; // Resetea el contador de reintentos al obtener una IP
         // Notificar exitosamente la conexión sin usar FreeRTOS
     }
 }
-
-
 
 static void ap_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
@@ -48,7 +150,7 @@ static void ap_event_handler(void* arg, esp_event_base_t event_base, int32_t eve
     }
 }
 
-
+// FUNCIONES DE INICIALIZACIÓN
 void sta_init(void)
 {
     //Initialize NVS
@@ -86,11 +188,7 @@ void sta_init(void)
         .sta = {
             .ssid = "Miguel",
             .password = "32554803",
-            /* Setting a password implies station will connect to all security modes including WEP/WPA.
-             * However these modes are deprecated and not advisable to be used. Incase your Access point
-             * doesn't support WPA2, these mode can be enabled by commenting below line */
 	     .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-	     // .sae_pwe_h2e = WPA3_SAE_PWE_BOTH,
         },
     };
     esp_wifi_set_mode(WIFI_MODE_STA);
@@ -99,8 +197,6 @@ void sta_init(void)
     esp_wifi_connect();
     printf("WiFi started\n");
 }
-
-
 
 void ap_init(void)
 {
@@ -146,95 +242,15 @@ void ap_init(void)
 }
 
 
-// Manejador de solicitudes HTTP GET
-// esp_err_t hello_get_handler(httpd_req_t *req) {
-//     const char* resp_str = "Hola mundo";
-//     httpd_resp_send(req, resp_str, strlen(resp_str));
-//     return ESP_OK;
-// }
-
-// Definición de la macro MIN
-#ifndef MIN
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
-#endif
-
-
-esp_err_t hello_get_handler(httpd_req_t *req)
-{
-    const char resp[] = "Hola mundo";
-    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-}
-
-httpd_uri_t hello = {
-    .uri       = "/",
-    .method    = HTTP_GET,
-    .handler   = hello_get_handler,
-    .user_ctx  = NULL
-};
-
-// Manejador de solicitudes HTTP POST
-esp_err_t hello_post_handler(httpd_req_t *req) {
-    char buf[100];
-    int ret, remaining = req->content_len;
-
-    // Leer el contenido del cuerpo de la solicitud
-    while (remaining > 0) {
-        if ((ret = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf)))) <= 0) {
-            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-                continue;  // Intentar recibir de nuevo
-            }
-            return ESP_FAIL;
-        }
-        remaining -= ret;
-        
-        // Procesar los datos recibidos
-        // Por ejemplo, simplemente imprimimos los datos recibidos (en un entorno real, procesar adecuadamente)
-        printf("Datos recibidos: %.*s\n", ret, buf);
-    }
-
-    // Responder al cliente que los datos fueron recibidos
-    const char* resp_str = "Datos recibidos";
-    httpd_resp_send(req, resp_str, strlen(resp_str));
-    return ESP_OK;
-};
-
-
-
-
-// Configurar el servidor web
-// httpd_handle_t start_webserver(void) {
-//     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-//     httpd_handle_t server = NULL;
-//
-//     if (httpd_start(&server, &config) == ESP_OK) {
-//         httpd_uri_t uri_get = {
-//             .uri       = "/",
-//             .method    = HTTP_GET,
-//             .handler   = hello_get_handler,
-//             .user_ctx  = NULL
-//         };
-//         httpd_register_uri_handler(server, &uri_get);
-//
-//         httpd_uri_t uri_post = {
-//             .uri       = "/post",
-//             .method    = HTTP_POST,
-//             .handler   = hello_post_handler,
-//             .user_ctx  = NULL
-//         };
-//         httpd_register_uri_handler(server, &uri_post);
-//     }
-//     return server;
-// }
-//
 void start_webserver(void)
 {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-
+    
     // Iniciar el servidor web
     if (httpd_start(&server, &config) == ESP_OK) {
-        httpd_register_uri_handler(server, &hello);
+        httpd_register_uri_handler(server, &home);
+        httpd_register_uri_handler(server, &echo);
     }
 }
 
@@ -242,6 +258,6 @@ void start_webserver(void)
 void app_main(void)
 {
     ap_init();
+    // init_spiffs();
     start_webserver();
-// httpd_handle_t server = start_webserver();
 }
