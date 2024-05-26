@@ -13,7 +13,6 @@
 
 #include "esp_vfs.h"
 #include "esp_http_server.h"
-#include "../components/spiffs/spiffs_config.c"
 
 // ----- INICIO SECCIÓN UTILIDADES -----
 // Definición de la macro MIN
@@ -71,7 +70,7 @@ esp_err_t hello_get_handler(httpd_req_t *req)
 }
 
 esp_err_t echo_post_handler(httpd_req_t *req) {
-    char buf[100];
+    char buf[100] = {0};
     int ret, remaining = req->content_len;
 
     if (remaining > 0) {
@@ -81,19 +80,19 @@ esp_err_t echo_post_handler(httpd_req_t *req) {
     }
 
     while (remaining > 0) {
-        ret = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf)));
+        ret = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf) - 1));
         if (ret <= 0) {
             if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-                // Manejo del timeout sin imprimir nada aún
                 continue;
             }
             printf("Error recibiendo datos: %d\n", ret);
             return ESP_FAIL;
         }
-        printf("Datos recibidos: %.*s\n", ret, buf);
+        buf[ret] = '\0';
         remaining -= ret;
     }
-    
+    printf("Datos recibidos (crudos): %s\n", buf);
+
     // Decodificar y reemplazar '+' con espacios
     char message[100] = {0};
     if (httpd_query_key_value(buf, "message", message, sizeof(message)) == ESP_OK) {
@@ -103,11 +102,9 @@ esp_err_t echo_post_handler(httpd_req_t *req) {
         printf("No se pudo decodificar el mensaje.\n");
     }
 
-    const char* resp_str = "Datos recibidos";
-    httpd_resp_send(req, resp_str, strlen(resp_str));
+    httpd_resp_send(req, "Datos recibidos", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
-
 // ENDPOINTS
 httpd_uri_t home = {
     .uri       = "/",
@@ -131,31 +128,58 @@ httpd_uri_t echo = {
 static int s_retry_num = 0;
 static const int EXAMPLE_ESP_MAXIMUM_RETRY = 5;
 
-static void sta_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-        } else {
-            // Aquí podrías, por ejemplo, cambiar el estado de una variable o llamar a una función propia de manejo de error.
-            s_retry_num = 0; // Resetea el contador de reintentos
-            
-        }
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        s_retry_num = 0; // Resetea el contador de reintentos al obtener una IP
-        // Notificar exitosamente la conexión sin usar FreeRTOS
+void sta_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+    switch(event_id) {
+        case WIFI_EVENT_STA_START:
+            esp_wifi_connect(); // Intentar conectar tras iniciar el WiFi
+            printf("Trying to connect...\n");
+            break;
+
+        case WIFI_EVENT_STA_DISCONNECTED:
+            if(s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
+                esp_wifi_connect(); // Reintentar conectar automáticamente
+                printf("Disconnected. Trying to reconnect...\n");
+                s_retry_num++;
+            }else {
+                printf("Connection failed. Maximum retries reached.\n");
+                s_retry_num = 0; 
+            }
+            break;
+
+        case IP_EVENT_STA_GOT_IP:
+            ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+            printf("Got IP: %d.%d.%d.%d\n",
+                   IP2STR(&event->ip_info.ip));
+
+            s_retry_num = 0;
+            break;
+
+        default:
+            break;
     }
 }
 
-static void ap_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
-{
-    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
-        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+static void ap_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+    switch(event_id) {
+        case WIFI_EVENT_AP_STACONNECTED:
+        {
+            wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+            printf("Station %02x:%02x:%02x:%02x:%02x:%02x join, AID=%d\n",
+                   event->mac[0], event->mac[1], event->mac[2], event->mac[3], event->mac[4], event->mac[5], event->aid);
+
+        }
+        break;
+
+        case WIFI_EVENT_AP_STADISCONNECTED:
+        {
+            wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+            printf("Station %02x:%02x:%02x:%02x:%02x:%02x leave, AID=%d\n",
+                   event->mac[0], event->mac[1], event->mac[2], event->mac[3], event->mac[4], event->mac[5], event->aid);
+        }
+        break;
+
+        default:
+            break;
     }
 }
 
