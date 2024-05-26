@@ -120,6 +120,13 @@ httpd_uri_t echo = {
     .user_ctx  = NULL
 };
 
+httpd_uri_t hello = {
+    .uri      = "/hello",
+    .method   = HTTP_GET,
+    .handler  = hello_get_handler,
+    .user_ctx = NULL
+}
+
 // ----- FIN SECCIÓN SERVER -----
 
 // ----- INICIO SECCIÓN WIFI -----
@@ -285,12 +292,12 @@ void start_webserver(void)
     if (httpd_start(&server, &config) == ESP_OK) {
         httpd_register_uri_handler(server, &home);
         httpd_register_uri_handler(server, &echo);
+        httpd_register_uri_handler(server, &hello);
     }
 }
 
 void app_main(void)
 {
     ap_init();
-    // init_spiffs();
     start_webserver();
 }
