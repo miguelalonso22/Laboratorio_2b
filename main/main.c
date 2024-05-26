@@ -45,13 +45,14 @@ static const char* html_code =
     "</head>"
     "<body>"
     "<div>"
-    "<h1>Bienvenido!</h1>"
-    "<h2>Al Laboratorio 2b de Miguel Alonso y Agustina Roballo</h2>"
+        "<h1>Bienvenido!</h1>" "<h2>Al Laboratorio 2b de Miguel Alonso y Agustina Roballo</h2>"
+        "<form action=\"/echo\" method=\"post\">"
+            "<div>"
+                "<textarea name=\"message\" placeholder='Ingrese su mensaje...' maxlength='100'></textarea>"
+                "<input type=\"submit\" value=\"Enviar\">"
+            "</div>"
+        "</form>"
     "</div>"
-    "<form action=\"/echo\" method=\"post\">"
-        "<textarea name=\"message\" placeholder='Ingrese su mensaje...' maxlength='100'></textarea>"
-        "<input type=\"submit\" value=\"Enviar\">"
-      "</form>"
     "</body>"
     "</html>";
 
@@ -125,7 +126,7 @@ httpd_uri_t hello = {
     .method   = HTTP_GET,
     .handler  = hello_get_handler,
     .user_ctx = NULL
-}
+};
 
 // ----- FIN SECCIÓN SERVER -----
 
