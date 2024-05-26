@@ -15,12 +15,26 @@
 #include "esp_http_server.h"
 #include "../components/spiffs/spiffs_config.c"
 
-
+// ----- INICIO SECCIÓN UTILIDADES -----
 // Definición de la macro MIN
 #ifndef MIN
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #endif
 
+// Función para reemplazar '+' con ' ' en una cadena
+void replace_plus_with_space(char *str) {
+    for (int i = 0; str[i]; i++) {
+        if (str[i] == '+') {
+            str[i] = ' ';
+        }
+    }
+}
+// ----- FIN SECCIÓN UTILIDADES -----
+
+
+// ----- INICIO SECCIÓN SERVER -----
+
+// Código HTML
 static const char* html_code = 
     "<!DOCTYPE html>"
     "<html>"
@@ -56,14 +70,6 @@ esp_err_t hello_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// Función para reemplazar '+' con ' ' en una cadena
-void replace_plus_with_space(char *str) {
-    for (int i = 0; str[i]; i++) {
-        if (str[i] == '+') {
-            str[i] = ' ';
-        }
-    }
-}
 esp_err_t echo_post_handler(httpd_req_t *req) {
     char buf[100];
     int ret, remaining = req->content_len;
@@ -117,6 +123,9 @@ httpd_uri_t echo = {
     .user_ctx  = NULL
 };
 
+// ----- FIN SECCIÓN SERVER -----
+
+// ----- INICIO SECCIÓN WIFI -----
 
 // EVENT HANDLERS
 static int s_retry_num = 0;
@@ -241,6 +250,7 @@ void ap_init(void)
 
 }
 
+// ----- FIN SECCIÓN WIFI -----
 
 void start_webserver(void)
 {
@@ -253,7 +263,6 @@ void start_webserver(void)
         httpd_register_uri_handler(server, &echo);
     }
 }
-
 
 void app_main(void)
 {
